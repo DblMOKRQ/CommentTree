@@ -1,0 +1,4 @@
+addr: "localhost:8080"
+master_dsn: "postgres://postgres:123@localhost:5432/comments?sslmode=disable"
+slaveDSNs: []
+log_level: "debug"

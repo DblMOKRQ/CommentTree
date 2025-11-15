@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Древовидные комментарии</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f4f4f4; }
+        h1, h2 { color: #333; }
+        .controls, .pagination, .search-box { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #fff; border: 1px solid #ddd; border-radius: 5px; margin-bottom: 20px; }
+        .search-box input { flex-grow: 1; padding: 8px; margin-right: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        .search-box button, .controls button { padding: 8px 12px; border: none; border-radius: 4px; cursor: pointer; }
+        #comments-tree { background: #fff; border: 1px solid #ddd; padding: 20px; border-radius: 5px; min-height: 100px; }
+        .comment { border-bottom: 1px solid #eee; padding: 10px 0; }
+        .comment:last-child { border-bottom: none; }
+        .comment-children { margin-left: 20px; padding-left: 20px; border-left: 2px solid #eee; }
+        .comment-actions button { background: none; border: none; color: #007bff; cursor: pointer; font-size: 14px; margin-right: 10px; padding: 0; }
+        .comment-actions button:hover { text-decoration: underline; }
+        textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; margin-bottom: 10px; font-size: 16px; }
+        #submit-form button { background-color: #28a745; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        #submit-form button:hover { background-color: #218838; }
+        #replying-info { font-style: italic; color: #555; margin-bottom: 10px; background-color: #e9ecef; padding: 8px; border-radius: 4px; }
+        #cancel-reply, #clear-search-btn { background-color: #6c757d; color: white; }
+        #cancel-reply:hover, #clear-search-btn:hover { background-color: #5a6268; }
+        .pagination button { padding: 5px 10px; cursor: pointer; border: 1px solid #ddd; background-color: #fff; }
+        .pagination button[disabled] { cursor: not-allowed; opacity: 0.5; }
+        .search-result .comment-children { display: none; } /* Скрываем вложенность в результатах поиска */
+        .search-result .reply-btn { display: none; } /* Скрываем кнопку "ответить" у результатов поиска */
+    </style>
+</head>
+<body>
+
+<h1>Древовидные комментарии</h1>
+
+<div class="search-box">
+    <input type="search" id="search-input" placeholder="Полнотекстовый поиск по комментариям...">
+    <button id="search-btn">Найти</button>
+    <button id="clear-search-btn" style="display: none;">Сбросить</button>
+</div>
+
+<div class="controls">
+    <div>
+        <label for="sort-by">Сортировать по:</label>
+        <select id="sort-by">
+            <option value="created_at" selected>Дате</option>
+            <option value="id">ID</option>
+        </select>
+        <select id="sort-order">
+            <option value="asc" selected>Возрастанию</option>
+            <option value="desc">Убыванию</option>
+        </select>
+    </div>
+    <div>
+        <label for="limit">На странице:</label>
+        <select id="limit">
+            <option value="5">5</option>
+            <option value="10" selected>10</option>
+            <option value="20">20</option>
+        </select>
+    </div>
+</div>
+
+<div id="comments-tree">
+    <p>Загрузка комментариев...</p>
+</div>
+
+<div class="pagination">
+    <button id="prev-page" disabled>‹ Назад</button>
+    <span id="page-info">Страница 1 из 1</span>
+    <button id="next-page" disabled>Вперед ›</button>
+</div>
+
+<hr style="margin: 30px 0;">
+
+<div id="submit-form">
+    <h2 id="form-title">Добавить новый комментарий</h2>
+    <div id="replying-info" style="display: none;"></div>
+    <textarea id="comment-text" placeholder="Введите ваш комментарий..." rows="4"></textarea>
+    <input type="hidden" id="parent-id">
+    <button id="submit-btn">Отправить</button>
+    <button id="cancel-reply" style="display: none;">Отмена</button>
+</div>
+
+<script>
+    // --- Состояние приложения ---
+    let currentPage = 1;
+    let totalPages = 1;
+
+    // --- DOM элементы ---
+    const commentsTree = document.getElementById('comments-tree');
+    const formTitle = document.getElementById('form-title');
+    const commentText = document.getElementById('comment-text');
+    const parentIdInput = document.getElementById('parent-id');
+    const submitBtn = document.getElementById('submit-btn');
+    const cancelReplyBtn = document.getElementById('cancel-reply');
+    const replyingInfo = document.getElementById('replying-info');
+    const prevPageBtn = document.getElementById('prev-page');
+    const nextPageBtn = document.getElementById('next-page');
+    const pageInfo = document.getElementById('page-info');
+    const sortBySelect = document.getElementById('sort-by');
+    const sortOrderSelect = document.getElementById('sort-order');
+    const limitSelect = document.getElementById('limit');
+    const searchInput = document.getElementById('search-input');
+    const searchBtn = document.getElementById('search-btn');
+    const clearSearchBtn = document.getElementById('clear-search-btn');
+
+    // --- Обработчики событий ---
+    document.addEventListener('DOMContentLoaded', () => fetchComments());
+    prevPageBtn.addEventListener('click', () => { if (currentPage > 1) { currentPage--; fetchComments(); } });
+    nextPageBtn.addEventListener('click', () => { if (currentPage < totalPages) { currentPage++; fetchComments(); } });
+    sortBySelect.addEventListener('change', () => { currentPage = 1; fetchComments(); });
+    sortOrderSelect.addEventListener('change', () => { currentPage = 1; fetchComments(); });
+    limitSelect.addEventListener('change', () => { currentPage = 1; fetchComments(); });
+    searchBtn.addEventListener('click', performSearch);
+    clearSearchBtn.addEventListener('click', clearSearch);
+    searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') performSearch(); });
+    submitBtn.addEventListener('click', submitComment);
+    cancelReplyBtn.addEventListener('click', resetForm);
+
+    /**
+     * Загружает и отображает комментарии с учетом пагинации и сортировки
+     */
+    async function fetchComments() {
+        commentsTree.innerHTML = '<p>Загрузка...</p>';
+        const limit = limitSelect.value;
+        const sortBy = sortBySelect.value;
+        const sortOrder = sortOrderSelect.value;
+
+        const url = `/comments?page=${currentPage}&limit=${limit}&sort_by=${sortBy}&sort_order=${sortOrder}`;
+
+        try {
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP ошибка! Статус: ${response.status}`);
+            const data = await response.json();
+
+            updatePagination(data);
+            renderComments(data.comments);
+
+        } catch (error) {
+            console.error('Ошибка при загрузке комментариев:', error);
+            commentsTree.innerHTML = `<p style="color: red;">Не удалось загрузить комментарии: ${error.message}</p>`;
+        }
+    }
+
+    /**
+     * Выполняет поиск
+     */
+    async function performSearch() {
+        const query = searchInput.value.trim();
+        if (query.length < 3) {
+            alert('Для поиска введите минимум 3 символа.');
+            return;
+        }
+
+        commentsTree.innerHTML = `<p>Ищем по запросу "${query}"...</p>`;
+        document.querySelector('.controls').style.display = 'none';
+        document.querySelector('.pagination').style.display = 'none';
+        clearSearchBtn.style.display = 'inline-block';
+
+        try {
+            const response = await fetch(`/search?q=${encodeURIComponent(query)}`);
+            if (!response.ok) throw new Error(`HTTP ошибка! Статус: ${response.status}`);
+            const data = await response.json();
+            renderComments(data.comments, true);
+        } catch (error) {
+            console.error('Ошибка при поиске:', error);
+            commentsTree.innerHTML = `<p style="color: red;">Не удалось выполнить поиск: ${error.message}</p>`;
+        }
+    }
+
+    /**
+     * Сбрасывает поиск и возвращает к обычному виду
+     */
+    function clearSearch() {
+        searchInput.value = '';
+        clearSearchBtn.style.display = 'none';
+        document.querySelector('.controls').style.display = 'flex';
+        document.querySelector('.pagination').style.display = 'flex';
+        currentPage = 1;
+        fetchComments();
+    }
+
+    /**
+     * Рендерит комментарии
+     * @param {Array} comments - Массив комментариев
+     * @param {boolean} isSearchResult - Флаг, указывающий, что это результаты поиска
+     */
+    function renderComments(comments, isSearchResult = false) {
+        commentsTree.innerHTML = '';
+        if (comments && comments.length > 0) {
+            comments.forEach(comment => {
+                const commentElement = createCommentElement(comment, isSearchResult);
+                commentsTree.appendChild(commentElement);
+            });
+        } else {
+            commentsTree.innerHTML = isSearchResult ? '<p>Ничего не найдено.</p>' : '<p>Комментариев пока нет. Будьте первым!</p>';
+        }
+    }
+
+    function updatePagination(data) {
+        currentPage = data.page;
+        totalPages = Math.ceil(data.total / data.limit);
+        if (totalPages === 0) totalPages = 1;
+
+        pageInfo.textContent = `Страница ${currentPage} из ${totalPages}`;
+        prevPageBtn.disabled = currentPage <= 1;
+        nextPageBtn.disabled = currentPage >= totalPages;
+    }
+
+    /**
+     * Рекурсивно создает DOM-элементы для комментария и его детей
+     */
+    function createCommentElement(comment, isSearchResult = false) {
+        const div = document.createElement('div');
+        div.className = isSearchResult ? 'comment search-result' : 'comment';
+        div.setAttribute('data-id', comment.id);
+
+        div.innerHTML = `
+            <p><strong>ID: ${comment.id}</strong> (создан: ${new Date(comment.created_at).toLocaleString()})</p>
+            <p>${comment.comm}</p>
+            <div class="comment-actions">
+                <button class="reply-btn">Ответить</button>
+                <button class="delete-btn">Удалить</button>
+            </div>
+        `;
+
+        if (!isSearchResult && comment.children && comment.children.length > 0) {
+            const childrenContainer = document.createElement('div');
+            childrenContainer.className = 'comment-children';
+            comment.children.forEach(child => childrenContainer.appendChild(createCommentElement(child, isSearchResult)));
+            div.appendChild(childrenContainer);
+        }
+
+        div.querySelector('.reply-btn').addEventListener('click', () => setupReply(comment.id, comment.comm));
+        div.querySelector('.delete-btn').addEventListener('click', () => deleteComment(comment.id));
+
+        return div;
+    }
+
+    /**
+     * Отправляет новый комментарий или ответ на сервер
+     */
+    async function submitComment() {
+        const text = commentText.value.trim();
+        if (!text) { alert('Комментарий не может быть пустым.'); return; }
+
+        const parentId = parentIdInput.value ? parseInt(parentIdInput.value, 10) : null;
+
+        try {
+            const response = await fetch('/comments', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ comment: text, parent_id: parentId }),
+            });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || `HTTP ошибка! Статус: ${response.status}`);
+            }
+
+            alert('Комментарий успешно добавлен!');
+            resetForm();
+            if (!parentId) { // Если это корневой комментарий, переходим на 1 страницу, чтобы увидеть его
+                currentPage = 1;
+            }
+            fetchComments();
+        } catch (error) {
+            console.error('Ошибка при отправке комментария:', error);
+            alert(`Не удалось отправить комментарий: ${error.message}`);
+        }
+    }
+
+    function setupReply(id, text) {
+        formTitle.textContent = `Ответ на комментарий ID: ${id}`;
+        replyingInfo.innerHTML = `Текст комментария: "<em>${text.substring(0, 50).replace(/</g, "&lt;").replace(/>/g, "&gt;")}...</em>"`;
+        replyingInfo.style.display = 'block';
+        parentIdInput.value = id;
+        cancelReplyBtn.style.display = 'inline-block';
+        commentText.focus();
+        window.scrollTo(0, document.body.scrollHeight);
+    }
+
+    function resetForm() {
+        formTitle.textContent = 'Добавить новый комментарий';
+        replyingInfo.style.display = 'none';
+        parentIdInput.value = '';
+        commentText.value = '';
+        cancelReplyBtn.style.display = 'none';
+    }
+
+    async function deleteComment(id) {
+        if (!confirm(`Вы уверены, что хотите удалить комментарий с ID ${id} и все ответы на него?`)) return;
+
+        try {
+            const response = await fetch(`/comments/${id}`, { method: 'DELETE' });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || `HTTP ошибка! Статус: ${response.status}`);
+            }
+            alert(`Комментарий ID ${id} и все дочерние были удалены.`);
+            fetchComments();
+        } catch (error) {
+            console.error('Ошибка при удалении комментария:', error);
+            alert(`Не удалось удалить комментарий: ${error.message}`);
+        }
+    }
+</script>
+
+</body>
+</html>
